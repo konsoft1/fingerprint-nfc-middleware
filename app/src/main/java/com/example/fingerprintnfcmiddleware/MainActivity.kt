@@ -1,5 +1,6 @@
 package com.example.fingerprintnfcmiddleware
 
+import android.Manifest
 import android.app.ActivityManager
 import android.app.AlertDialog
 import android.content.BroadcastReceiver
@@ -7,16 +8,22 @@ import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,8 +35,11 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.nextbiometrics.biometrics.NBBiometricsContext
 import com.nextbiometrics.devices.NBDevice
 import com.nextbiometrics.devices.NBDeviceScanFormatInfo
@@ -61,66 +71,120 @@ class MainActivity : ComponentActivity() {
     private val DEFAULT_RESET_PIN_NUMBER = 0
     private val DEFAULT_CHIP_SELECT_PIN_NUMBER = 0
     private val ENABLE_BACKGROUND_SUBTRACTION: Int = 1
+    //Storage Permission request code
+    private val READ_WRITE_PERMISSION_REQUEST_CODE: Int = 1
+    private val PERMISSION_CALLBACK_CODE: Int = 2
+    /**
+     * USB permission
+     */
+    private val ACTION_USB_PERMISSION: String = "com.example.yourapp.USB_PERMISSION"
 
     var FLAGS: Int = 0
 
-    private val nfcTagReceiver = object : BroadcastReceiver() {
+
+    private val isNfcServiceRunning = mutableStateOf(false)
+    private val isFpServiceRunning = mutableStateOf(false)
+    private val tagList = mutableStateListOf<String>()
+    private val templateList = mutableStateListOf<String>()
+
+    private val broadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            val tagId = intent?.getStringExtra("tagId")
-            tagId?.let {
-                // Display the NFC tag information in the UI
-                addTagToList(it)
+            when (intent?.action) {
+                "$packageName.NFC_TAG_DISCOVERED" -> {
+                    val tagId = intent.getStringExtra("tagId")
+                    tagId?.let {
+                        // Display the NFC tag information in the UI
+                        addTagToList(it)
+                    }
+                }
+                "$packageName.FP_TEMPLATE_DISCOVERED" -> {
+                    val template = intent.getStringExtra("template")
+                    template?.let {
+                        // Display the NFC tag information in the UI
+                        addTemplateToList(it)
+                    }
+                }
+                "$packageName.NFC_SERVICE_STOPPED" -> {
+                    isNfcServiceRunning.value = false
+                }
+                "$packageName.FP_SERVICE_STOPPED" -> {
+                    isFpServiceRunning.value = false
+                }
             }
         }
     }
 
-    private val tagList = mutableStateListOf<String>()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            val isServiceRunning = remember { mutableStateOf(isServiceRunning(MainForegroundService::class.java)) }
+            isNfcServiceRunning.value = isServiceRunning(NFCForegroundService::class.java)
+            isFpServiceRunning.value = isServiceRunning(FPForegroundService::class.java)
 
             MainScreen(
-                onStartService = {
-                    startNFCService()
-                    isServiceRunning.value = true
+                onStartNfcService = {
+                    startNfcService()
+                    isNfcServiceRunning.value = true
                 },
-                onStopService = {
-                    stopNFCService()
-                    isServiceRunning.value = false
+                onStopNfcService = {
+                    stopNfcService()
+                    isNfcServiceRunning.value = false
                 },
-                isServiceRunning = isServiceRunning.value,
-                tagList = tagList
+                onStartFpService = {
+                    startFpService()
+                    isFpServiceRunning.value = true
+                },
+                onStopFpService = {
+                    stopFpService()
+                    isFpServiceRunning.value = false
+                },
+                isNfcServiceRunning = isNfcServiceRunning.value,
+                isFpServiceRunning = isFpServiceRunning.value,
+                tagList = tagList,
+                templateList = templateList
             )
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // Register receiver to listen for NFC tag broadcasts
-        val filter = IntentFilter("com.example.fingerprintnfcmiddleware.NFC_TAG_DISCOVERED")
+
+        registerBroadcastReceiver("NFC_TAG_DISCOVERED")
+        registerBroadcastReceiver("NFC_SERVICE_STOPPED")
+        registerBroadcastReceiver("FP_TEMPLATE_DISCOVERED")
+        registerBroadcastReceiver("FP_SERVICE_STOPPED")
+    }
+
+    private fun registerBroadcastReceiver(filterName: String) {
+        val filter = IntentFilter("$packageName.$filterName")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(nfcTagReceiver, filter, RECEIVER_NOT_EXPORTED)
+            registerReceiver(broadcastReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
-            registerReceiver(nfcTagReceiver, filter)
+            registerReceiver(broadcastReceiver, filter)
         }
     }
 
     override fun onPause() {
         super.onPause()
-        // Unregister receiver to stop receiving broadcasts when the activity is not visible
-        unregisterReceiver(nfcTagReceiver)
+
+        unregisterReceiver(broadcastReceiver)
     }
 
-    private fun startNFCService() {
+    private fun startNfcService() {
+        val serviceIntent = Intent(this, NFCForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        }
+    }
 
-        // Fingerprinter
+    private fun startFpService() {
+        if(!checkPermission())
+        {
+            requestPermission();
+        }
         try {
             if ((device == null) || (device != null && !device!!.isSessionOpen())) {
                 //During Reset/unplug-device Session Closed. Need to re-Initilize Device
-                deviceInit()
-                //if (deviceInit()) showMessage("Device initialized")
+                if (deviceInit()) showMessage("Device initialized")
             }
             if (device != null) {
                 val context: NBBiometricsContext = NBBiometricsContext(device)
@@ -140,13 +204,62 @@ class MainActivity : ComponentActivity() {
             ex.printStackTrace()
         }
 
-        // NFC
-        val serviceIntent = Intent(this, MainForegroundService::class.java)
+        val serviceIntent = Intent(this, FPForegroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
         }
     }
 
+    //Check storage permission for device calibration data(65210-S).
+    private fun checkPermission(): Boolean {
+        /*API-Level-30-Start*/
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return Environment.isExternalStorageManager()
+        } else {
+            val readPermission = ContextCompat.checkSelfPermission(
+                this@MainActivity,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            )
+            val writePermission = ContextCompat.checkSelfPermission(
+                this@MainActivity,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+            return readPermission == PackageManager.PERMISSION_GRANTED && writePermission == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                intent.addCategory("android.intent.category.DEFAULT")
+                intent.setData(
+                    Uri.parse(
+                        String.format(
+                            "package:%s", *arrayOf<Any>(
+                                applicationContext.packageName
+                            )
+                        )
+                    )
+                )
+                startActivityForResult(intent, PERMISSION_CALLBACK_CODE)
+            } catch (e: java.lang.Exception) {
+                val intent = Intent()
+                intent.setAction(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                startActivityForResult(intent, PERMISSION_CALLBACK_CODE)
+            }
+        } else {
+            ActivityCompat.requestPermissions(
+                this@MainActivity,
+                arrayOf<String>(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    ACTION_USB_PERMISSION
+                ),
+                READ_WRITE_PERMISSION_REQUEST_CODE
+            )
+        }
+    }
 
     private fun deviceInit(): Boolean {
         try {
@@ -418,7 +531,7 @@ class MainActivity : ComponentActivity() {
                     device!!.openSession(cdkId, cdk)
                     device!!.SetBlobParameter(NBDevice.BLOB_PARAMETER_SET_CDK, null)
                     device!!.closeSession()
-                } catch (ex: RuntimeException) {
+                } catch (_: RuntimeException) {
                 }
                 device!!.openSession(cakId, cak)
                 device!!.SetBlobParameter(NBDevice.BLOB_PARAMETER_SET_CDK, cdk)
@@ -430,8 +543,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun stopNFCService() {
-        val serviceIntent = Intent(this, MainForegroundService::class.java)
+    private fun stopNfcService() {
+        val serviceIntent = Intent(this, NFCForegroundService::class.java)
+        stopService(serviceIntent)
+    }
+
+    private fun stopFpService() {
+        val serviceIntent = Intent(this, FPForegroundService::class.java)
         stopService(serviceIntent)
     }
 
@@ -449,33 +567,74 @@ class MainActivity : ComponentActivity() {
         tagList.add(tagId)
         Log.d("MainActivity", "Received NFC Tag: $tagId")
     }
+
+    private fun addTemplateToList(template: String) {
+        templateList.add(template)
+        Log.d("MainActivity", "Received FP Template: $template")
+    }
 }
 
 @Composable
 fun MainScreen(
-    onStartService: () -> Unit,
-    onStopService: () -> Unit,
-    isServiceRunning: Boolean,
-    tagList: List<String>
+    onStartNfcService: () -> Unit,
+    onStopNfcService: () -> Unit,
+    onStartFpService: () -> Unit,
+    onStopFpService: () -> Unit,
+    isNfcServiceRunning: Boolean,
+    isFpServiceRunning: Boolean,
+    tagList: List<String>,
+    templateList: List<String>
 ) {
-    Column(modifier = Modifier.padding(16.dp)) {
-        Button(
-            onClick = onStartService,
-            modifier = Modifier.padding(bottom = 8.dp),
-            enabled = !isServiceRunning // Enabled only if the service is not running
-        ) {
-            Text(text = "Start NFC Service")
+    Row(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .background(color = Color(.9f, 1f, .9f))
+            .padding(16.dp)) {
+            Button(
+                onClick = onStartNfcService,
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                enabled = !isNfcServiceRunning // Enabled only if the service is not running
+            ) {
+                Text(text = "Start NFC Service")
+            }
+            Button(
+                onClick = onStopNfcService,
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                enabled = isNfcServiceRunning // Enabled only if the service is running
+            ) {
+                Text(text = "Stop NFC Service")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = "Discovered NFC Tags:")
+            Spacer(modifier = Modifier.height(8.dp))
+            NFCList(tagList = tagList)
         }
-        Button(
-            onClick = onStopService,
-            modifier = Modifier.padding(top = 8.dp),
-            enabled = isServiceRunning // Enabled only if the service is running
-        ) {
-            Text(text = "Stop NFC Service")
+
+        Column(modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .background(color = Color(1f, 1f, .85f))
+            .padding(16.dp)) {
+            Button(
+                onClick = onStartFpService,
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                enabled = !isFpServiceRunning // Enabled only if the service is not running
+            ) {
+                Text(text = "Start FP Service")
+            }
+            Button(
+                onClick = onStopFpService,
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                enabled = isFpServiceRunning // Enabled only if the service is running
+            ) {
+                Text(text = "Stop FP Service")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = "Discovered FP Templates:")
+            Spacer(modifier = Modifier.height(8.dp))
+            FPList(templateList = templateList)
         }
-        Text(text = "Discovered NFC Tags:")
-        Spacer(modifier = Modifier.height(8.dp))
-        NFCList(tagList = tagList)
     }
 }
 
@@ -488,24 +647,26 @@ fun NFCList(tagList: List<String>) {
     }
 }
 
-@Preview(name = "Service Not Running", showBackground = true)
+@Composable
+fun FPList(templateList: List<String>) {
+    LazyColumn(modifier = Modifier.fillMaxHeight()) {
+        items(templateList) { template ->
+            Text(text = "Template: $template", modifier = Modifier.padding(4.dp))
+        }
+    }
+}
+
+@Preview(name = "Preview", showBackground = true)
 @Composable
 fun MainScreenPreviewServiceNotRunning() {
     MainScreen(
-        onStartService = {},
-        onStopService = {},
-        isServiceRunning = false,
-        tagList = listOf("Tag1", "Tag2", "Tag3")
-    )
-}
-
-@Preview(name = "Service Running", showBackground = true)
-@Composable
-fun MainScreenPreviewServiceRunning() {
-    MainScreen(
-        onStartService = {},
-        onStopService = {},
-        isServiceRunning = true,
-        tagList = listOf("Tag1", "Tag2", "Tag3")
+        onStartNfcService = {},
+        onStopNfcService = {},
+        onStartFpService = {},
+        onStopFpService = {},
+        isNfcServiceRunning = false,
+        isFpServiceRunning = true,
+        tagList = listOf("Tag1", "Tag2", "Tag3"),
+        templateList = listOf("Template1", "Template2", "Template3")
     )
 }

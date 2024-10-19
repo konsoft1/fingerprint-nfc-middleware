@@ -3,11 +3,12 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-feature android:name="android.hardware.usb.host" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
@@ -23,13 +24,21 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.FingerprintNFCMiddleware"
         tools:targetApi="31">
-
         <service
-            android:name=".MainForegroundService"
+            android:name=".NFCForegroundService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice">
             <intent-filter>
-                <action android:name="android.nfc.action.TAG_DISCOVERED"/>
+                <action android:name="android.nfc.action.TAG_DISCOVERED" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".FPForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice">
+            <intent-filter>
+                <action android:name="android.nfc.action.TAG_DISCOVERED" />
             </intent-filter>
         </service>
 
@@ -39,6 +48,7 @@
             android:theme="@style/Theme.FingerprintNFCMiddleware">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>

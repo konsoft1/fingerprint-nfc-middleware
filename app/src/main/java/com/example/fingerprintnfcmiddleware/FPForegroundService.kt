@@ -16,19 +16,28 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
-class MainForegroundService : Service() {
+class FPForegroundService : Service() {
 
-    private val CHANNEL_ID = "NFCServiceChannel"
-    private val nfcReceiver = NfcReceiver()
+    private val CHANNEL_ID = "FPServiceChannel"
+    private val fpReceiver = FpReceiver()
+
+    private val serviceJob = Job()
+    private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
 
     private val retrofit = Retrofit.Builder()
-        .baseUrl("https://your-api-server.com/") // Replace with your API's base URL
+        .baseUrl("https://your-api-server.com/fp/") // Replace with your API's base URL
         .addConverterFactory(GsonConverterFactory.create())
         .build()
     private val apiService = retrofit.create(ApiService::class.java)
@@ -40,20 +49,42 @@ class MainForegroundService : Service() {
         createNotificationChannel()
         startForegroundService()
 
-        // Register for NFC tag discovered broadcast
+        // Register for Fingerprint discovered broadcast
         val filter = IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(nfcReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                registerReceiver(fpReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
             } else {
-                registerReceiver(nfcReceiver, filter)
+                registerReceiver(fpReceiver, filter)
             }
+        }
+
+        serviceScope.launch {
+            initFp()
+        }
+    }
+
+    private suspend fun initFp() {
+        try {
+            for (i: Int in 1..2) {
+                sendFpBroadcastToActivity("FP Broadcast: $i")
+                delay(2000)
+            }
+
+            haltFp()
+        } catch (e: CancellationException) {
+            Log.d("FP Service", "Coroutine was cancelled")
+        } catch (e: Exception) {
+            Log.e("FP Service", "Error in FP coroutine", e)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        unregisterReceiver(nfcReceiver) // Unregister the receiver when service is destroyed
+
+        serviceJob.cancel()
+
+        unregisterReceiver(fpReceiver) // Unregister the receiver when service is destroyed
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -75,9 +106,9 @@ class MainForegroundService : Service() {
         )
 
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NFC Foreground Service")
-            .setContentText("Reading NFC tags...")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Fingerprint Foreground Service")
+            .setContentText("Reading Fingerprints...")
+            .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setContentIntent(pendingIntent)
             .setOngoing(true) // Prevents notification from being dismissed by the user
             .build()
@@ -96,7 +127,7 @@ class MainForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
-                "NFC Service Channel",
+                "Fingerprint Service Channel",
                 NotificationManager.IMPORTANCE_DEFAULT
             )
             val manager = getSystemService(NotificationManager::class.java)
@@ -104,43 +135,55 @@ class MainForegroundService : Service() {
         }
     }
 
-    // Inner class for NFC BroadcastReceiver
-    private inner class NfcReceiver : BroadcastReceiver() {
+    // Inner class for Fingerprint BroadcastReceiver
+    private inner class FpReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == NfcAdapter.ACTION_TAG_DISCOVERED) {
                 val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
                 tag?.let {
                     val tagId = it.id.joinToString(separator = "") { byte -> "%02x".format(byte) } // Convert to hex string
-                    sendNfcDataToApi(tagId)
-                    sendBroadcastToActivity(tagId)
-                    Log.d("NFC Service", "NFC Tag discovered: $tagId")
+                    sendFpDataToApi(tagId)
+                    sendFpBroadcastToActivity(tagId)
+                    Log.d("FP Service", "FP Tag discovered: $tagId")
                 }
             }
         }
     }
 
-    private fun sendNfcDataToApi(tagId: String) {
-        val nfcData = NfcData(tagId = tagId)
-        val call = apiService.sendNfcData(nfcData)
+    private fun sendFpDataToApi(template: String) {
+        val fpData = FpData(template = template)
+        val call = apiService.sendFpData(fpData)
 
         call.enqueue(object : Callback<Void> {
             override fun onResponse(call: Call<Void>, response: Response<Void>) {
                 if (response.isSuccessful) {
-                    Log.d("NFC Service", "Data sent successfully: $tagId")
+                    Log.d("FP Service", "Data sent successfully: $template")
                 } else {
-                    Log.e("NFC Service", "Failed to send data: ${response.code()}")
+                    Log.e("FP Service", "Failed to send data: ${response.code()}")
                 }
             }
 
             override fun onFailure(call: Call<Void>, t: Throwable) {
-                Log.e("NFC Service", "Error sending data", t)
+                Log.e("FP Service", "Error sending data", t)
             }
         })
     }
 
-    private fun sendBroadcastToActivity(tagId: String) {
-        val intent = Intent("com.example.fingerprintnfcmiddleware.NFC_TAG_DISCOVERED")
-        intent.putExtra("tagId", tagId)
+    private fun sendFpBroadcastToActivity(template: String) {
+        val intent = Intent("$packageName.FP_TEMPLATE_DISCOVERED")
+        intent.putExtra("template", template)
+        sendBroadcast(intent)
+    }
+
+    private fun haltFp() {
+        sendStopBroadcastToActivity()
+
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun sendStopBroadcastToActivity() {
+        val intent = Intent("$packageName.FP_SERVICE_STOPPED")
         sendBroadcast(intent)
     }
 }
