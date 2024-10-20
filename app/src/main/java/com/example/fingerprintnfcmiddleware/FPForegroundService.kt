@@ -66,16 +66,21 @@ class FPForegroundService : Service() {
 
     private suspend fun initFp() {
         try {
-            for (i: Int in 1..2) {
-                sendFpBroadcastToActivity("FP Broadcast: $i")
-                delay(2000)
+            val fpConnector = FPConnector(applicationContext)
+            fpConnector.initFp()
+            while(true) {
+                val template = fpConnector.scanAndExtract()
+                if (template.isNotEmpty()) {
+                    sendFpDataToApi(template)
+                    sendFpBroadcastToActivity(template)
+                }
             }
-
-            haltFp()
         } catch (e: CancellationException) {
             Log.d("FP Service", "Coroutine was cancelled")
         } catch (e: Exception) {
             Log.e("FP Service", "Error in FP coroutine", e)
+            e.message?.let { sendFpBroadcastToActivity(it) }
+            haltFp()
         }
     }
 
