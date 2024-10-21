@@ -1,3 +1,12 @@
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    load(file("local.properties").inputStream())
+}
+
+val nfcApiUrl: String?= localProperties.getProperty("NFC_API_URL")
+val fpApiUrl: String?= localProperties.getProperty("FP_API_URL")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -17,6 +26,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+
+        nfcApiUrl?.let {
+            buildConfigField("String", "NFC_API_URL", "\"$it\"")
+        }
+        fpApiUrl?.let {
+            buildConfigField("String", "FP_API_URL", "\"$it\"")
         }
     }
 
@@ -38,6 +54,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.1"

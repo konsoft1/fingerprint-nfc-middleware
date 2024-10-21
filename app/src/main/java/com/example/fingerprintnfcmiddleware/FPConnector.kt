@@ -266,7 +266,7 @@ class FPConnector(private val applicationContext: Context) {
                     }*/
                 }
                 if (extractResult!!.status != NBBiometricsStatus.OK) {
-                    throw java.lang.Exception("Extraction failed, reason: " + extractResult!!.status)
+                    throw java.lang.Exception("Extraction failed, reason: " + extractResult.status)
                 }
                 //Antispoof check
                 val tmpSpoofThreshold: Int = ANTISPOOF_THRESHOLD.toInt()
@@ -274,7 +274,7 @@ class FPConnector(private val applicationContext: Context) {
                     throw java.lang.Exception("Extraction failed, reason: " + spoofCause)
                 }
                 showMessage("Extracted successfully!")
-                val template = extractResult!!.template
+                val template = extractResult.template
                 quality = template.quality
                 /*showResultOnUiThread(
                     previewListener.getLastImage(),
@@ -417,7 +417,6 @@ class FPConnector(private val applicationContext: Context) {
         }
         if (context != null) {
             context.dispose()
-            context = null
         }
 
         onScanExtractCompleted()

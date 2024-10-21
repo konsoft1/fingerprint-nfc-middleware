@@ -10,6 +10,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.nfc.NfcAdapter
+import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -48,6 +50,11 @@ import com.nextbiometrics.devices.NBDeviceSecurityModel
 import com.nextbiometrics.devices.NBDeviceType
 import com.nextbiometrics.devices.NBDevices
 import com.nextbiometrics.system.NextBiometricsException
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -69,35 +76,9 @@ class MainActivity : ComponentActivity() {
      */
     private val ACTION_USB_PERMISSION: String = "com.example.yourapp.USB_PERMISSION"
 
-    private val broadcastReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                "$packageName.NFC_TAG_DISCOVERED" -> {
-                    val tagId = intent.getStringExtra("tagId")
-                    tagId?.let {
-                        // Display the NFC tag information in the UI
-                        addTagToList(it)
-                    }
-                }
-                "$packageName.FP_TEMPLATE_DISCOVERED" -> {
-                    val template = intent.getStringExtra("template")
-                    template?.let {
-                        // Display the NFC tag information in the UI
-                        addTemplateToList(it)
-                    }
-                }
-                "$packageName.NFC_SERVICE_STOPPED" -> {
-                    isNfcServiceRunning.value = false
-                }
-                "$packageName.FP_SERVICE_STOPPED" -> {
-                    isFpServiceRunning.value = false
-                }
-            }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContent {
             isNfcServiceRunning.value = isServiceRunning(NFCForegroundService::class.java)
             isFpServiceRunning.value = isServiceRunning(FPForegroundService::class.java)
@@ -125,6 +106,8 @@ class MainActivity : ComponentActivity() {
                 templateList = templateList
             )
         }
+
+        //handleNfcIntent(intent)
     }
 
     override fun onResume() {
@@ -134,6 +117,39 @@ class MainActivity : ComponentActivity() {
         registerBroadcastReceiver("NFC_SERVICE_STOPPED")
         registerBroadcastReceiver("FP_TEMPLATE_DISCOVERED")
         registerBroadcastReceiver("FP_SERVICE_STOPPED")
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+
+        //handleNfcIntent(intent)
+    }
+
+    private val broadcastReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                "$packageName.NFC_TAG_DISCOVERED" -> {
+                    val tagId = intent.getStringExtra("tagId")
+                    tagId?.let {
+                        // Display the NFC tag information in the UI
+                        addTagToList(it)
+                    }
+                }
+                "$packageName.FP_TEMPLATE_DISCOVERED" -> {
+                    val template = intent.getStringExtra("template")
+                    template?.let {
+                        // Display the NFC tag information in the UI
+                        addTemplateToList(it)
+                    }
+                }
+                "$packageName.NFC_SERVICE_STOPPED" -> {
+                    isNfcServiceRunning.value = false
+                }
+                "$packageName.FP_SERVICE_STOPPED" -> {
+                    isFpServiceRunning.value = false
+                }
+            }
+        }
     }
 
     private fun registerBroadcastReceiver(filterName: String) {
@@ -242,6 +258,45 @@ class MainActivity : ComponentActivity() {
         }
         return false
     }
+
+    /*private fun handleNfcIntent(intent: Intent) {
+        if (intent.action == NfcAdapter.ACTION_TAG_DISCOVERED) {
+            val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
+            tag?.let {
+                val tagId = it.id.joinToString(separator = "") { byte -> "%02x".format(byte) }
+                Log.d("MainActivity", "NFC Tag discovered: $tagId")
+                // Process the NFC tag ID as needed
+                sendNfcDataToApi(tagId)
+                addTagToList(tagId)
+            }
+            moveTaskToBack(true)
+        }
+    }
+
+    private val retrofit = Retrofit.Builder()
+        .baseUrl("https://your-api-server.com/nfc/") // Replace with your API's base URL
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+    private val apiService = retrofit.create(ApiService::class.java)
+
+    private fun sendNfcDataToApi(tagId: String) {
+        val nfcData = NfcData(tagId = tagId)
+        val call = apiService.sendNfcData(nfcData)
+
+        call.enqueue(object : Callback<Void> {
+            override fun onResponse(call: Call<Void>, response: Response<Void>) {
+                if (response.isSuccessful) {
+                    Log.d("NFC Service", "Data sent successfully: $tagId")
+                } else {
+                    Log.e("NFC Service", "Failed to send data: ${response.code()}")
+                }
+            }
+
+            override fun onFailure(call: Call<Void>, t: Throwable) {
+                Log.e("NFC Service", "Error sending data", t)
+            }
+        })
+    }*/
 
     private fun addTagToList(tagId: String) {
         tagList.add(tagId)

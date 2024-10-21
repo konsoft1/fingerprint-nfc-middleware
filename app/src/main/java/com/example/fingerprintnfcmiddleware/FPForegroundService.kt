@@ -37,7 +37,7 @@ class FPForegroundService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
 
     private val retrofit = Retrofit.Builder()
-        .baseUrl("https://your-api-server.com/fp/") // Replace with your API's base URL
+        .baseUrl(BuildConfig.FP_API_URL)
         .addConverterFactory(GsonConverterFactory.create())
         .build()
     private val apiService = retrofit.create(ApiService::class.java)
@@ -78,7 +78,7 @@ class FPForegroundService : Service() {
         } catch (e: CancellationException) {
             Log.d("FP Service", "Coroutine was cancelled")
         } catch (e: Exception) {
-            Log.e("FP Service", "Error in FP coroutine", e)
+            Log.w("FP Service", "Error in FP coroutine", e)
             e.message?.let { sendFpBroadcastToActivity(it) }
             haltFp()
         }
@@ -176,6 +176,7 @@ class FPForegroundService : Service() {
 
     private fun sendFpBroadcastToActivity(template: String) {
         val intent = Intent("$packageName.FP_TEMPLATE_DISCOVERED")
+        intent.setPackage(packageName)
         intent.putExtra("template", template)
         sendBroadcast(intent)
     }
@@ -189,6 +190,7 @@ class FPForegroundService : Service() {
 
     private fun sendStopBroadcastToActivity() {
         val intent = Intent("$packageName.FP_SERVICE_STOPPED")
+        intent.setPackage(packageName)
         sendBroadcast(intent)
     }
 }

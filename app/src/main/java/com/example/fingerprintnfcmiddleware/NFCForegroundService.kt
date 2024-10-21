@@ -37,7 +37,7 @@ class NFCForegroundService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
 
     private val retrofit = Retrofit.Builder()
-        .baseUrl("https://your-api-server.com/nfc/") // Replace with your API's base URL
+        .baseUrl(BuildConfig.NFC_API_URL)
         .addConverterFactory(GsonConverterFactory.create())
         .build()
     private val apiService = retrofit.create(ApiService::class.java)
@@ -103,11 +103,16 @@ class NFCForegroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE // Correct usage for Android 14+
         )
 
+        val stopIntent = Intent(this, NFCForegroundService::class.java)
+        stopIntent.setAction("STOP_SERVICE") // Define an action to stop the service
+        val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("NFC Foreground Service")
             .setContentText("Reading NFC tags...")
             .setSmallIcon(android.R.drawable.ic_dialog_dialer)
             .setContentIntent(pendingIntent)
+            .addAction(android.R.drawable.ic_delete, "Stop service", stopPendingIntent)
             .setOngoing(true) // Prevents notification from being dismissed by the user
             .build()
 
@@ -119,6 +124,22 @@ class NFCForegroundService : Service() {
         } else {
             startForeground(1, notification)
         }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == NfcAdapter.ACTION_TAG_DISCOVERED) {
+            val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
+            tag?.let {
+                val tagId = it.id.joinToString(separator = "") { byte -> "%02x".format(byte) } // Convert to hex string
+                //sendNfcDataToApi(tagId)
+                sendNfcBroadcastToActivity(tagId)
+                Log.d("NFC Service", "NFC Tag discovered: $tagId")
+            }
+        } else if (intent?.action == "STOP_SERVICE") {
+            haltNfc()
+            return START_NOT_STICKY; // Do not recreate the service
+        }
+        return START_STICKY
     }
 
     private fun createNotificationChannel() {
@@ -140,7 +161,7 @@ class NFCForegroundService : Service() {
                 val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
                 tag?.let {
                     val tagId = it.id.joinToString(separator = "") { byte -> "%02x".format(byte) } // Convert to hex string
-                    sendNfcDataToApi(tagId)
+                    //sendNfcDataToApi(tagId)
                     sendNfcBroadcastToActivity(tagId)
                     Log.d("NFC Service", "NFC Tag discovered: $tagId")
                 }
@@ -169,6 +190,7 @@ class NFCForegroundService : Service() {
 
     private fun sendNfcBroadcastToActivity(tagId: String) {
         val intent = Intent("$packageName.NFC_TAG_DISCOVERED")
+        intent.setPackage(packageName)
         intent.putExtra("tagId", tagId)
         sendBroadcast(intent)
     }
@@ -182,6 +204,7 @@ class NFCForegroundService : Service() {
 
     private fun sendStopBroadcastToActivity() {
         val intent = Intent("$packageName.NFC_SERVICE_STOPPED")
+        intent.setPackage(packageName)
         sendBroadcast(intent)
     }
 }
