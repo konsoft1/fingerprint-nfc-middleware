@@ -12,6 +12,8 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.nfc.NfcAdapter
 import android.nfc.Tag
+import android.nfc.tech.MifareClassic
+import android.nfc.tech.NfcA
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -27,14 +29,13 @@ import retrofit2.Callback
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.lang.Thread.sleep
 
 class NFCForegroundService : Service() {
 
     private val CHANNEL_ID = "NFCServiceChannel"
-    private val nfcReceiver = NfcReceiver()
-
-    private val serviceJob = Job()
-    private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private lateinit var notificationManager: NotificationManager
+    private val NOTIFICATION_ID = 1
 
     private val retrofit = Retrofit.Builder()
         .baseUrl(BuildConfig.NFC_API_URL)
@@ -46,43 +47,9 @@ class NFCForegroundService : Service() {
         super.onCreate()
 
         // Create the notification channel and start the foreground service
+        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
         startForegroundService()
-
-        // Register for NFC tag discovered broadcast
-        val filter = IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(nfcReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                registerReceiver(nfcReceiver, filter)
-            }
-        }
-
-        serviceScope.launch {
-            initNfc()
-        }
-    }
-
-    private suspend fun initNfc() {
-        try {
-            for (i: Int in 1..20) {
-                sendNfcBroadcastToActivity("NFC Broadcast: $i")
-                delay(2000)
-            }
-        } catch (e: CancellationException) {
-            Log.d("NFC Service", "Coroutine was cancelled")
-        } catch (e: Exception) {
-            Log.e("NFC Service", "Error in NFC coroutine", e)
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-
-        serviceJob.cancel()
-
-        unregisterReceiver(nfcReceiver) // Unregister the receiver when service is destroyed
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -103,43 +70,55 @@ class NFCForegroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE // Correct usage for Android 14+
         )
 
-        val stopIntent = Intent(this, NFCForegroundService::class.java)
-        stopIntent.setAction("STOP_SERVICE") // Define an action to stop the service
-        val stopPendingIntent = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
-
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("NFC Foreground Service")
-            .setContentText("Reading NFC tags...")
+            .setContentText("Waiting NFC tags...")
             .setSmallIcon(android.R.drawable.ic_dialog_dialer)
             .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_delete, "Stop service", stopPendingIntent)
-            .setOngoing(true) // Prevents notification from being dismissed by the user
+            //.addAction(android.R.drawable.ic_delete, "Stop service", stopPendingIntent)
+            .setOngoing(true)
             .build()
 
-        // Make the notification non-dismissible
         notification.flags = Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         } else {
-            startForeground(1, notification)
+            startForeground(NOTIFICATION_ID, notification)
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == NfcAdapter.ACTION_TAG_DISCOVERED) {
-            val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
-            tag?.let {
-                val tagId = it.id.joinToString(separator = "") { byte -> "%02x".format(byte) } // Convert to hex string
-                //sendNfcDataToApi(tagId)
-                sendNfcBroadcastToActivity(tagId)
-                Log.d("NFC Service", "NFC Tag discovered: $tagId")
-            }
-        } else if (intent?.action == "STOP_SERVICE") {
-            haltNfc()
-            return START_NOT_STICKY; // Do not recreate the service
+        val tag = intent?.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
+        tag?.let {
+            val tagId =
+                it.id.joinToString(separator = "") { byte -> "%02x".format(byte) } // Convert to hex string
+
+            val newId = convertTagId(it)
+
+            updateNotification("NFC tag tapped: $tagId")
+            sendNfcBroadcastToActivity("$newId")
+            //sendNfcDataToApi(tagId)
+            Log.d("NFC Service", "Mifare Tag discovered: $newId")
         }
         return START_STICKY
+    }
+
+    private fun convertTagId(tag: Tag): ULong {
+        val id = tag.id
+        val newId: ULong = id[2].toUByte() * 100000u + id[1].toUByte() * (0x100).toULong() + id[0].toUByte()
+        return newId
+    }
+
+    private fun updateNotification(status: String) {
+        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("NFC Foreground Service")
+            .setContentText(status)
+            .setSmallIcon(android.R.drawable.ic_dialog_dialer)
+            .setOngoing(true)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun createNotificationChannel() {
@@ -149,23 +128,7 @@ class NFCForegroundService : Service() {
                 "NFC Service Channel",
                 NotificationManager.IMPORTANCE_DEFAULT
             )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(serviceChannel)
-        }
-    }
-
-    // Inner class for NFC BroadcastReceiver
-    private inner class NfcReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == NfcAdapter.ACTION_TAG_DISCOVERED) {
-                val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
-                tag?.let {
-                    val tagId = it.id.joinToString(separator = "") { byte -> "%02x".format(byte) } // Convert to hex string
-                    //sendNfcDataToApi(tagId)
-                    sendNfcBroadcastToActivity(tagId)
-                    Log.d("NFC Service", "NFC Tag discovered: $tagId")
-                }
-            }
+            notificationManager.createNotificationChannel(serviceChannel)
         }
     }
 
@@ -177,6 +140,8 @@ class NFCForegroundService : Service() {
             override fun onResponse(call: Call<Void>, response: Response<Void>) {
                 if (response.isSuccessful) {
                     Log.d("NFC Service", "Data sent successfully: $tagId")
+                    updateNotification("NFC data sent to API")
+                    stopForegroundService()
                 } else {
                     Log.e("NFC Service", "Failed to send data: ${response.code()}")
                 }
@@ -193,18 +158,23 @@ class NFCForegroundService : Service() {
         intent.setPackage(packageName)
         intent.putExtra("tagId", tagId)
         sendBroadcast(intent)
+
+        updateNotification("NFC data broadcast: $tagId")
     }
 
-    private fun haltNfc() {
-        sendStopBroadcastToActivity()
+    private fun stopForegroundService() {
+        // Allow the notification to be swiped away by setting it as cancelable
+        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("NFC Foreground Service")
+            .setContentText("NFC handling completed.")
+            .setSmallIcon(android.R.drawable.ic_dialog_dialer)
+            .setAutoCancel(true) // Notification can be swiped away
+            .build()
 
+        notificationManager.notify(NOTIFICATION_ID, notification)
+
+        // Stop the foreground service and remove the notification
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
-    }
-
-    private fun sendStopBroadcastToActivity() {
-        val intent = Intent("$packageName.NFC_SERVICE_STOPPED")
-        intent.setPackage(packageName)
-        sendBroadcast(intent)
     }
 }

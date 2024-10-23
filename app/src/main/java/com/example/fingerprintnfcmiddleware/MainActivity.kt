@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
     /**
      * USB permission
      */
-    private val ACTION_USB_PERMISSION: String = "com.example.yourapp.USB_PERMISSION"
+    private val ACTION_USB_PERMISSION: String = "com.nextbiometrics.devices.USB_PERMISSION"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,8 +106,6 @@ class MainActivity : ComponentActivity() {
                 templateList = templateList
             )
         }
-
-        //handleNfcIntent(intent)
     }
 
     override fun onResume() {
@@ -117,12 +115,8 @@ class MainActivity : ComponentActivity() {
         registerBroadcastReceiver("NFC_SERVICE_STOPPED")
         registerBroadcastReceiver("FP_TEMPLATE_DISCOVERED")
         registerBroadcastReceiver("FP_SERVICE_STOPPED")
-    }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-
-        //handleNfcIntent(intent)
+        Log.d("MainActivity", "Activity resumed and ready to receive broadcasts")
     }
 
     private val broadcastReceiver = object : BroadcastReceiver() {
@@ -130,6 +124,7 @@ class MainActivity : ComponentActivity() {
             when (intent?.action) {
                 "$packageName.NFC_TAG_DISCOVERED" -> {
                     val tagId = intent.getStringExtra("tagId")
+                    Log.d("MainActivity::", "NFC_TAG_DISCOVERY")
                     tagId?.let {
                         // Display the NFC tag information in the UI
                         addTagToList(it)
@@ -258,45 +253,6 @@ class MainActivity : ComponentActivity() {
         }
         return false
     }
-
-    /*private fun handleNfcIntent(intent: Intent) {
-        if (intent.action == NfcAdapter.ACTION_TAG_DISCOVERED) {
-            val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
-            tag?.let {
-                val tagId = it.id.joinToString(separator = "") { byte -> "%02x".format(byte) }
-                Log.d("MainActivity", "NFC Tag discovered: $tagId")
-                // Process the NFC tag ID as needed
-                sendNfcDataToApi(tagId)
-                addTagToList(tagId)
-            }
-            moveTaskToBack(true)
-        }
-    }
-
-    private val retrofit = Retrofit.Builder()
-        .baseUrl("https://your-api-server.com/nfc/") // Replace with your API's base URL
-        .addConverterFactory(GsonConverterFactory.create())
-        .build()
-    private val apiService = retrofit.create(ApiService::class.java)
-
-    private fun sendNfcDataToApi(tagId: String) {
-        val nfcData = NfcData(tagId = tagId)
-        val call = apiService.sendNfcData(nfcData)
-
-        call.enqueue(object : Callback<Void> {
-            override fun onResponse(call: Call<Void>, response: Response<Void>) {
-                if (response.isSuccessful) {
-                    Log.d("NFC Service", "Data sent successfully: $tagId")
-                } else {
-                    Log.e("NFC Service", "Failed to send data: ${response.code()}")
-                }
-            }
-
-            override fun onFailure(call: Call<Void>, t: Throwable) {
-                Log.e("NFC Service", "Error sending data", t)
-            }
-        })
-    }*/
 
     private fun addTagToList(tagId: String) {
         tagList.add(tagId)

@@ -171,10 +171,12 @@ class FPConnector(private val applicationContext: Context) {
         } catch (ex: NextBiometricsException) {
             showMessage("ERROR: NEXT Biometrics SDK error: $ex", true)
             ex.printStackTrace()
+            throw ex
             return false
         } catch (ex: Throwable) {
             showMessage("ERROR: $ex", true)
             ex.printStackTrace()
+            throw ex
             return false
         }
     }

@@ -31,7 +31,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 class FPForegroundService : Service() {
 
     private val CHANNEL_ID = "FPServiceChannel"
-    private val fpReceiver = FpReceiver()
+    //private val fpReceiver = FpReceiver()
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
@@ -50,14 +50,14 @@ class FPForegroundService : Service() {
         startForegroundService()
 
         // Register for Fingerprint discovered broadcast
-        val filter = IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
+        /*val filter = IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(fpReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
             } else {
                 registerReceiver(fpReceiver, filter)
             }
-        }
+        }*/
 
         serviceScope.launch {
             initFp()
@@ -68,12 +68,14 @@ class FPForegroundService : Service() {
         try {
             val fpConnector = FPConnector(applicationContext)
             fpConnector.initFp()
+            delay(1)
             while(true) {
                 val template = fpConnector.scanAndExtract()
                 if (template.isNotEmpty()) {
                     sendFpDataToApi(template)
                     sendFpBroadcastToActivity(template)
                 }
+                delay(1)
             }
         } catch (e: CancellationException) {
             Log.d("FP Service", "Coroutine was cancelled")
@@ -89,7 +91,7 @@ class FPForegroundService : Service() {
 
         serviceJob.cancel()
 
-        unregisterReceiver(fpReceiver) // Unregister the receiver when service is destroyed
+        //unregisterReceiver(fpReceiver) // Unregister the receiver when service is destroyed
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -141,7 +143,7 @@ class FPForegroundService : Service() {
     }
 
     // Inner class for Fingerprint BroadcastReceiver
-    private inner class FpReceiver : BroadcastReceiver() {
+    /*private inner class FpReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == NfcAdapter.ACTION_TAG_DISCOVERED) {
                 val tag = intent.getParcelableExtra<Tag>(NfcAdapter.EXTRA_TAG)
@@ -153,7 +155,7 @@ class FPForegroundService : Service() {
                 }
             }
         }
-    }
+    }*/
 
     private fun sendFpDataToApi(template: String) {
         val fpData = FpData(template = template)

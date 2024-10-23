@@ -12,6 +12,9 @@ import org.junit.Assert.*
 class ExampleUnitTest {
     @Test
     fun addition_isCorrect() {
-        assertEquals(4, 2 + 2)
+        val id: ByteArray = byteArrayOf(0xe4.toByte(), 0x77.toByte(), 0x8e.toByte(), 0xaa.toByte())
+        val newId: ULong = id[2].toUByte() * 100000u + id[1].toUByte() * (0x100).toULong() + id[0].toUByte()
+        print(newId)
+        assertEquals(14230692uL, newId)
     }
 }
