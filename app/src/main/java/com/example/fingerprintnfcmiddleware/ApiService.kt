@@ -4,18 +4,25 @@ import retrofit2.Call
 import retrofit2.http.POST
 import retrofit2.http.Body
 
-interface ApiService {
-    @POST("nfc/data")
-    fun sendNfcData(@Body data: NfcData): Call<Void>
+data class ApiResponse(
+    val success: Boolean,
+    val msg: String
+)
 
-    @POST("fp/data")
-    fun sendFpData(@Body data: FpData): Call<Void>
+interface ApiService {
+    @POST("read-rfid-card")
+    fun sendNfcData(@Body data: NfcData): Call<ApiResponse>
+
+    @POST("read-fingerprint")
+    fun sendFpData(@Body data: FpData): Call<ApiResponse>
 }
 
 data class NfcData(
-    val tagId: String
+    val tagId: String,
+    val deviceId: String,
 )
 
 data class FpData (
-    val template: String
+    val template: String,
+    val deviceId: String,
 )

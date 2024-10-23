@@ -1,5 +1,6 @@
 package com.example.fingerprintnfcmiddleware
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -16,6 +17,7 @@ import android.nfc.tech.MifareClassic
 import android.nfc.tech.NfcA
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CancellationException
@@ -98,8 +100,8 @@ class NFCForegroundService : Service() {
 
             updateNotification("NFC tag tapped: $tagId")
             sendNfcBroadcastToActivity("$newId")
-            //sendNfcDataToApi(tagId)
-            Log.d("NFC Service", "Mifare Tag discovered: $newId")
+            sendNfcDataToApi("$newId")
+            Log.d("NFC Service", "Mifare Tag discovered (broadcast): $newId")
         }
         return START_STICKY
     }
@@ -132,25 +134,32 @@ class NFCForegroundService : Service() {
         }
     }
 
+    @SuppressLint("HardwareIds")
     private fun sendNfcDataToApi(tagId: String) {
-        val nfcData = NfcData(tagId = tagId)
-        val call = apiService.sendNfcData(nfcData)
+        try {
+            val nfcData = NfcData(tagId = tagId, deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID))
+            val call = apiService.sendNfcData(nfcData)
 
-        call.enqueue(object : Callback<Void> {
-            override fun onResponse(call: Call<Void>, response: Response<Void>) {
-                if (response.isSuccessful) {
-                    Log.d("NFC Service", "Data sent successfully: $tagId")
-                    updateNotification("NFC data sent to API")
-                    stopForegroundService()
-                } else {
-                    Log.e("NFC Service", "Failed to send data: ${response.code()}")
+            call.enqueue(object : Callback<ApiResponse> {
+                override fun onResponse(call: Call<ApiResponse>, response: Response<ApiResponse>) {
+                    if (response.isSuccessful) {
+                        Log.d("NFC Service", "Data sent successfully: $tagId")
+                        Log.d("NFC Service", "Response from API: ${response.body()?.msg}")
+                        updateNotification("NFC data sent to API")
+                        stopForegroundService()
+                        stopSelf()
+                    } else {
+                        Log.e("NFC Service", "Failed to send data: ${response.code()}")
+                    }
                 }
-            }
 
-            override fun onFailure(call: Call<Void>, t: Throwable) {
-                Log.e("NFC Service", "Error sending data", t)
-            }
-        })
+                override fun onFailure(call: Call<ApiResponse>, t: Throwable) {
+                    Log.e("NFC Service", "Error sending data", t)
+                }
+            })
+        } catch (ex: Exception) {
+            Log.e("NFC Service", "Error sending data to API", ex)
+        }
     }
 
     private fun sendNfcBroadcastToActivity(tagId: String) {

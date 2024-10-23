@@ -1,5 +1,6 @@
 package com.example.fingerprintnfcmiddleware
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -14,6 +15,7 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CancellationException
@@ -157,23 +159,29 @@ class FPForegroundService : Service() {
         }
     }*/
 
+    @SuppressLint("HardwareIds")
     private fun sendFpDataToApi(template: String) {
-        val fpData = FpData(template = template)
-        val call = apiService.sendFpData(fpData)
+        try {
+            val fpData = FpData(template = template, deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID))
+            val call = apiService.sendFpData(fpData)
 
-        call.enqueue(object : Callback<Void> {
-            override fun onResponse(call: Call<Void>, response: Response<Void>) {
-                if (response.isSuccessful) {
-                    Log.d("FP Service", "Data sent successfully: $template")
-                } else {
-                    Log.e("FP Service", "Failed to send data: ${response.code()}")
+            call.enqueue(object : Callback<ApiResponse> {
+                override fun onResponse(call: Call<ApiResponse>, response: Response<ApiResponse>) {
+                    if (response.isSuccessful) {
+                        Log.d("FP Service", "Data sent successfully: $template")
+                        Log.d("FP Service", "Response from API: ${response.body()?.msg}")
+                    } else {
+                        Log.e("FP Service", "Failed to send data: ${response.code()}")
+                    }
                 }
-            }
 
-            override fun onFailure(call: Call<Void>, t: Throwable) {
-                Log.e("FP Service", "Error sending data", t)
-            }
-        })
+                override fun onFailure(call: Call<ApiResponse>, t: Throwable) {
+                    Log.e("FP Service", "Error sending data", t)
+                }
+            })
+        } catch (ex: Exception) {
+            Log.e("FP Service", "Error sending data to API", ex)
+        }
     }
 
     private fun sendFpBroadcastToActivity(template: String) {
